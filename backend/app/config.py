@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    database_url: str
     rabbitmq_user: str
     rabbitmq_password: str
     rabbitmq_host: str = "rabbitmq"
