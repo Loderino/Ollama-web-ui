@@ -11,6 +11,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "celery>=5.7.0",
+    "fastapi>=0.162.2",
+    "pydantic-settings>=2.16.2",
+    "uvicorn>=0.54.0",
 ]
 
 [build-system]

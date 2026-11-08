@@ -3,15 +3,15 @@ services:
     image: postgres:16-alpine
     container_name: ollama_web_postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
-      POSTGRES_DB: ${POSTGRES_DB:-ollama_web}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-ollama_web}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,13 +22,14 @@ services:
     image: rabbitmq:latest
     container_name: ollama_web_rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-app}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-app}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${RABBITMQ_PORT}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -39,17 +40,22 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: ollama_web_backend
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-ollama_web}
-      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-app}:${RABBITMQ_PASSWORD:-app}@rabbitmq:5672//
-      CELERY_RESULT_BACKEND: rpc://
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,16 +66,21 @@ services:
 
   worker:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: ollama_web_worker
     command: celery -A app.celery_app worker --loglevel=info
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-ollama_web}
-      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-app}:${RABBITMQ_PASSWORD:-app}@rabbitmq:5672//
-      CELERY_RESULT_BACKEND: rpc://
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend/app:/app/app
     depends_on:
       postgres:
         condition: service_healthy
