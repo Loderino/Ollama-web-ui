@@ -16,7 +16,7 @@ class Connection(Base):
     base_url: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
-    chats: Mapped[list["Chat"]] = relationship(back_populates="connection", cascade="all, delete-orphan")
+    chats: Mapped[list["Chat"]] = relationship(back_populates="connection")
 
 
 class Chat(Base):
@@ -24,7 +24,7 @@ class Chat(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
-    connection_id: Mapped[int] = mapped_column(ForeignKey("connections.id"))
+    connection_id: Mapped[int | None] = mapped_column(ForeignKey("connections.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)

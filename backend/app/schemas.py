@@ -64,7 +64,7 @@ class ChatUpdate(BaseModel):
 class ChatResponse(BaseModel):
     id: int
     title: str
-    connection_id: int
+    connection_id: int | None
     model_name: str | None
     temperature: float | None
     top_k: int | None

@@ -1,6 +1,6 @@
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -42,6 +42,18 @@ async def create_connection(data: ConnectionCreate, db: AsyncSession = Depends(g
 async def get_connections(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Connection))
     return result.scalars().all()
+
+
+@app.delete("/connections/{connection_id}", status_code=204)
+async def delete_connection(connection_id: int, db: AsyncSession = Depends(get_db)):
+    connection = await db.get(Connection, connection_id)
+    if not connection:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    await db.execute(
+        update(Chat).where(Chat.connection_id == connection_id).values(connection_id=None, model_name=None)
+    )
+    await db.delete(connection)
+    await db.commit()
 
 
 @app.get("/connections/{connection_id}/models", response_model=OllamaTagsResponse)
@@ -136,6 +148,7 @@ async def get_messages(
         raise HTTPException(status_code=404, detail="Chat not found")
 
     query = select(Message).where(Message.chat_id == chat_id)
+
     if before_id:
         query = query.where(Message.id < before_id)
 
@@ -144,6 +157,7 @@ async def get_messages(
     result = await db.execute(query)
     messages = result.scalars().all()
 
-    next_cursor = messages[-1].id if len(messages) == limit else None
+    messages = list(reversed(messages))
+    next_cursor = messages[0].id if len(messages) == limit else None
 
     return {"messages": messages, "next_cursor": next_cursor}

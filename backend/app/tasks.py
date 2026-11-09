@@ -1,4 +1,5 @@
 import httpx
+from sqlalchemy import select
 
 from app.celery_app import celery_app
 from app.database import SyncSessionLocal
@@ -25,13 +26,18 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
         db.add(user_msg)
         db.commit()
 
+        history_query = select(Message).where(Message.chat_id == chat_id).order_by(Message.id.desc())
+        history = db.execute(history_query).scalars().all()
+        history = list(reversed(history))
+        ollama_messages = [{"role": m.role, "content": m.content} for m in history]
+
         ollama_url = connection.base_url
         model = chat.model_name
         temperature = chat.temperature
         top_k = chat.top_k
         top_p = chat.top_p
 
-    url = f"{ollama_url.rstrip('/')}/api/generate"
+    url = f"{ollama_url.rstrip('/')}/api/chat"
     options = {}
     if temperature is not None:
         options["temperature"] = temperature
@@ -40,14 +46,14 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
     if top_p is not None:
         options["top_p"] = top_p
 
-    payload = {"model": model, "prompt": prompt, "stream": False, "options": options}
+    payload = {"model": model, "messages": ollama_messages, "stream": False, "options": options}
 
     with httpx.Client(timeout=300.0) as client:
         response = client.post(url, json=payload)
         response.raise_for_status()
         data = response.json()
 
-    answer = data.get("response", "")
+    answer = data.get("message", {}).get("content", "")
 
     with SyncSessionLocal() as db:
         assistant_msg = Message(chat_id=chat_id, role="assistant", content=answer)
