@@ -18,12 +18,8 @@ class ConnectionResponse(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    connection_id: int
-    model: str
+    chat_id: int
     prompt: str
-    temperature: float | None = None
-    top_k: int | None = None
-    top_p: float | None = None
 
 
 class OllamaModelDetails(BaseModel):
@@ -50,3 +46,48 @@ class OllamaModel(BaseModel):
 
 class OllamaTagsResponse(BaseModel):
     models: list[OllamaModel]
+
+
+class ChatCreate(BaseModel):
+    title: str
+    connection_id: int
+
+
+class ChatUpdate(BaseModel):
+    title: str | None = None
+    model_name: str | None = None
+    temperature: float | None = None
+    top_k: int | None = None
+    top_p: float | None = None
+
+
+class ChatResponse(BaseModel):
+    id: int
+    title: str
+    connection_id: int
+    model_name: str | None
+    temperature: float | None
+    top_k: int | None
+    top_p: float | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MessageCreate(BaseModel):
+    content: str
+
+
+class MessageResponse(BaseModel):
+    id: int
+    chat_id: int
+    role: str
+    content: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MessageListResponse(BaseModel):
+    messages: list[MessageResponse]
+    next_cursor: int | None

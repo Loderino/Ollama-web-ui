@@ -1,11 +1,20 @@
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Connection
-from app.schemas import ConnectionCreate, ConnectionResponse, GenerateRequest, OllamaTagsResponse
+from app.models import Chat, Connection, Message
+from app.schemas import (
+    ChatCreate,
+    ChatResponse,
+    ChatUpdate,
+    ConnectionCreate,
+    ConnectionResponse,
+    GenerateRequest,
+    MessageListResponse,
+    OllamaTagsResponse,
+)
 from app.tasks import generate_ollama_response
 
 app = FastAPI(title="Ollama Web UI")
@@ -52,19 +61,89 @@ async def get_connection_models(connection_id: int, db: AsyncSession = Depends(g
         raise HTTPException(status_code=502, detail=f"Cannot reach Ollama at {connection.base_url}") from err
 
 
-@app.post("/generate")
-async def generate(request: GenerateRequest, db: AsyncSession = Depends(get_db)):
-    connection = await db.get(Connection, request.connection_id)
+@app.post("/chats", response_model=ChatResponse, status_code=201)
+async def create_chat(data: ChatCreate, db: AsyncSession = Depends(get_db)):
+    connection = await db.get(Connection, data.connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    task = generate_ollama_response.delay(
-        ollama_url=connection.base_url,
-        model=request.model,
-        prompt=request.prompt,
-        temperature=request.temperature,
-        top_k=request.top_k,
-        top_p=request.top_p,
-    )
+    chat = Chat(title=data.title, connection_id=data.connection_id)
+    db.add(chat)
+    await db.commit()
+    await db.refresh(chat)
+    return chat
 
+
+@app.get("/chats", response_model=list[ChatResponse])
+async def list_chats(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Chat).order_by(Chat.created_at.desc()))
+    return result.scalars().all()
+
+
+@app.get("/chats/{chat_id}", response_model=ChatResponse)
+async def get_chat(chat_id: int, db: AsyncSession = Depends(get_db)):
+    chat = await db.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
+@app.patch("/chats/{chat_id}", response_model=ChatResponse)
+async def update_chat(chat_id: int, data: ChatUpdate, db: AsyncSession = Depends(get_db)):
+    chat = await db.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(chat, field, value)
+
+    await db.commit()
+    await db.refresh(chat)
+    return chat
+
+
+@app.delete("/chats/{chat_id}", status_code=204)
+async def delete_chat(chat_id: int, db: AsyncSession = Depends(get_db)):
+    chat = await db.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    await db.delete(chat)
+    await db.commit()
+
+
+@app.post("/generate")
+async def generate(request: GenerateRequest, db: AsyncSession = Depends(get_db)):
+    chat = await db.get(Chat, request.chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    task = generate_ollama_response.delay(
+        chat_id=request.chat_id,
+        prompt=request.prompt,
+    )
     return {"task_id": task.id}
+
+
+@app.get("/chats/{chat_id}/messages", response_model=MessageListResponse)
+async def get_messages(
+    chat_id: int,
+    before_id: int | None = None,
+    limit: int = Query(default=50, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    chat = await db.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    query = select(Message).where(Message.chat_id == chat_id)
+    if before_id:
+        query = query.where(Message.id < before_id)
+
+    query = query.order_by(Message.id.desc()).limit(limit)
+
+    result = await db.execute(query)
+    messages = result.scalars().all()
+
+    next_cursor = messages[-1].id if len(messages) == limit else None
+
+    return {"messages": messages, "next_cursor": next_cursor}

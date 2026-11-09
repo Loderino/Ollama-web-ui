@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text, func
+from sqlalchemy import Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -24,9 +24,13 @@ class Chat(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
-    model_name: Mapped[str] = mapped_column(String(100))
     connection_id: Mapped[int] = mapped_column(ForeignKey("connections.id"))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
+    top_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    top_p: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     connection: Mapped["Connection"] = relationship(back_populates="chats")
     messages: Mapped[list["Message"]] = relationship(back_populates="chat", cascade="all, delete-orphan")
