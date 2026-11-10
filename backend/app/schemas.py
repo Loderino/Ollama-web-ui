@@ -58,6 +58,7 @@ class ChatCreate(BaseModel):
 class ChatUpdate(BaseModel):
     title: str | None = None
     model_name: str | None = None
+    connection_id: int | None = None
     temperature: float | None = None
     top_k: int | None = None
     top_p: float | None = None

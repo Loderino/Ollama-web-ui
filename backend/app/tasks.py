@@ -75,25 +75,24 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
         error_occurred = True
         full_answer = "Не удалось подключиться к серверу Ollama."
 
-    with SyncSessionLocal() as db:
-        assistant_msg = Message(
-            chat_id=chat_id, role="assistant" if not error_occurred else "system", content=full_answer
-        )
-        db.add(assistant_msg)
-        db.commit()
-        msg_id = assistant_msg.id
+    if not error_occurred:
+        with SyncSessionLocal() as db:
+            assistant_msg = Message(chat_id=chat_id, role="assistant", content=full_answer)
+            db.add(assistant_msg)
+            db.commit()
+            msg_id = assistant_msg.id
 
-    event = {
-        "type": "message.done",
-        "message": {
-            "id": msg_id,
-            "chat_id": chat_id,
-            "role": "assistant" if not error_occurred else "system",
-            "content": full_answer,
-        },
-    }
+        event = {
+            "type": "message.done",
+            "message": {"id": msg_id, "chat_id": chat_id, "role": "assistant", "content": full_answer},
+        }
+    else:
+        event = {
+            "type": "message.done",
+            "message": {"id": int(time.time() * 1000), "chat_id": chat_id, "role": "system", "content": full_answer},
+        }
+
     r.publish(channel, json.dumps(event))
-
     return full_answer
 
 
@@ -152,25 +151,30 @@ def generate_ollama_response_stream(chat_id: int, prompt: str) -> str:
             event = {"type": "message.chunk", "chat_id": chat_id, "content": buffer}
             r.publish(channel, json.dumps(event))
 
-        with SyncSessionLocal() as db:
-            final_content = full_answer if full_answer else "Генерация была прервана."
+        if not error_occurred:
+            with SyncSessionLocal() as db:
+                final_content = full_answer if full_answer else "Генерация была прервана."
 
-            assistant_msg = Message(
-                chat_id=chat_id, role="assistant" if not error_occurred else "system", content=final_content
-            )
-            db.add(assistant_msg)
-            db.commit()
-            msg_id = assistant_msg.id
+                assistant_msg = Message(chat_id=chat_id, role="assistant", content=final_content)
+                db.add(assistant_msg)
+                db.commit()
+                msg_id = assistant_msg.id
 
-        event = {
-            "type": "message.done",
-            "message": {
-                "id": msg_id,
-                "chat_id": chat_id,
-                "role": "assistant" if not error_occurred else "system",
-                "content": final_content,
-            },
-        }
+            event = {
+                "type": "message.done",
+                "message": {"id": msg_id, "chat_id": chat_id, "role": "assistant", "content": final_content},
+            }
+        else:
+            event = {
+                "type": "message.done",
+                "message": {
+                    "id": int(time.time() * 1000),
+                    "chat_id": chat_id,
+                    "role": "system",
+                    "content": full_answer,
+                },
+            }
+
         r.publish(channel, json.dumps(event))
 
     return full_answer

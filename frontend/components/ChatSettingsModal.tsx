@@ -37,6 +37,19 @@ export default function ChatSettingsModal({
   const [searchQuery, setSearchQuery] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Синхронизация состояния при открытии
+  useEffect(() => {
+    if (isOpen) {
+      setModel(chat.model_name || "");
+      setTemperature(chat.temperature ?? 0.7);
+      setTopK(chat.top_k ?? 40);
+      setTopP(chat.top_p ?? 0.9);
+      setIsStreaming(chat.is_streaming ?? true);
+      setSearchQuery("");
+      setIsDropdownOpen(false);
+    }
+  }, [isOpen, chat]);
+
   useEffect(() => {
     if (!isOpen) return;
     setIsLoading(true);
@@ -88,7 +101,7 @@ export default function ChatSettingsModal({
 
     const settings = {
       model_name: model || null,
-      connection_id: selectedModel?.connectionId || null,
+      connection_id: selectedModel?.connectionId || chat.connection_id || null,
       temperature,
       top_k: topK,
       top_p: topP,
@@ -114,6 +127,10 @@ export default function ChatSettingsModal({
 
   const selectedModelDisplay = models.find(m => m.name === model);
 
+  const displayName = selectedModelDisplay
+    ? `${selectedModelDisplay.name}${selectedModelDisplay.details.parameter_size ? ` (${selectedModelDisplay.details.parameter_size})` : ""}`
+    : model || "Выберите модель";
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-[#171719] border border-neutral-800 rounded-xl p-6 w-full max-w-md shadow-2xl">
@@ -124,22 +141,16 @@ export default function ChatSettingsModal({
 
         <div className="space-y-5">
 
-          {/* Выбор модели */}
           <div ref={dropdownRef} className="relative">
             <label className="block text-xs text-neutral-400 mb-1">Модель</label>
 
             <div
-              onClick={() => !isLoading && setIsDropdownOpen(!isDropdownOpen)}
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               className="w-full bg-[#0f0f11] border border-neutral-800 rounded-lg px-3 py-2.5 text-sm focus:outline-none cursor-pointer flex justify-between items-center group"
             >
               <div className="truncate">
-                {isLoading ? (
-                  <span className="text-neutral-500">Загрузка...</span>
-                ) : selectedModelDisplay ? (
-                  <span className="text-neutral-200">
-                    {selectedModelDisplay.name}
-                    {selectedModelDisplay.details.parameter_size && ` (${selectedModelDisplay.details.parameter_size})`}
-                  </span>
+                {model ? (
+                  <span className="text-neutral-200">{displayName}</span>
                 ) : (
                   <span className="text-neutral-500">Выберите модель</span>
                 )}
@@ -162,7 +173,9 @@ export default function ChatSettingsModal({
                   />
                 </div>
                 <div className="max-h-60 overflow-y-auto p-1">
-                  {filteredModels.length === 0 ? (
+                  {isLoading ? (
+                    <div className="text-sm text-neutral-500 text-center py-4">Загрузка моделей...</div>
+                  ) : filteredModels.length === 0 ? (
                     <div className="text-sm text-neutral-500 text-center py-4">Ничего не найдено</div>
                   ) : (
                     filteredModels.map((m, idx) => (
@@ -186,7 +199,6 @@ export default function ChatSettingsModal({
             )}
           </div>
 
-          {/* Компактные числовые поля в ряд */}
           <div className="grid grid-cols-3 gap-3">
 
             <div>
@@ -248,7 +260,6 @@ export default function ChatSettingsModal({
 
           </div>
 
-          {/* Переключатель стриминга */}
           <div className="flex items-center justify-between pt-2">
             <label className="text-sm text-neutral-300">Потоковый ответ</label>
             <button

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { Chat, Message } from "./types";
 import ConnectionsModal from "../components/ConnectionsModal";
 import ChatSettingsModal from "../components/ChatSettingsModal";
 import Markdown from "../components/Markdown";
 
-export default function Home() {
+function ChatPage() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -14,6 +15,9 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [hasConnections, setHasConnections] = useState<boolean | null>(null);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const [isConnectionsOpen, setIsConnectionsOpen] = useState(false);
   const [isChatSettingsOpen, setIsChatSettingsOpen] = useState(false);
@@ -30,9 +34,14 @@ export default function Home() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
 
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const activeChat = chats.find(c => c.id === activeChatId);
 
@@ -40,7 +49,11 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  useEffect(() => { scrollToBottom(); }, [messages, isLoading]);
+  useEffect(() => {
+    if (!isLoading) {
+      textareaRef.current?.focus();
+    }
+  }, [activeChatId, isLoading]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -51,17 +64,79 @@ export default function Home() {
 
   const loadData = async () => {
     const chatsRes = await fetch("/api/chats");
-    setChats(await chatsRes.json());
+    const chatsData = await chatsRes.json();
+    setChats(chatsData);
 
     const connRes = await fetch("/api/connections");
     const conns = await connRes.json();
     setHasConnections(conns.length > 0);
+
+    return chatsData;
+  };
+
+  useEffect(() => {
+    async function init() {
+      const chatsData = await loadData();
+
+      const chatIdFromUrl = searchParams.get("chat");
+      if (chatIdFromUrl) {
+        const parsedId = Number(chatIdFromUrl);
+
+        // Проверяем, что это число и что такой чат есть в списке
+        if (!isNaN(parsedId) && chatsData.some((c: Chat) => c.id === parsedId)) {
+          setActiveChatId(parsedId);
+        } else {
+          // Если чата нет, очищаем URL
+          router.replace(pathname, { scroll: false });
+        }
+      }
+    }
+    init();
+  }, [searchParams]);
+
+  const handleChatSelect = (chatId: number | null) => {
+    setActiveChatId(chatId);
+    if (chatId) {
+      router.replace(`${pathname}?chat=${chatId}`, { scroll: false });
+    } else {
+      router.replace(pathname, { scroll: false });
+    }
   };
 
   const loadMessages = async (chatId: number) => {
     const res = await fetch(`/api/chats/${chatId}/messages`);
     const data = await res.json();
     setMessages(data.messages);
+    setNextCursor(data.next_cursor);
+    setTimeout(scrollToBottom, 50);
+  };
+
+  const loadMoreMessages = async () => {
+    if (!nextCursor || !activeChatId || isLoadingHistory) return;
+
+    setIsLoadingHistory(true);
+
+    const container = messagesContainerRef.current;
+    const oldScrollHeight = container ? container.scrollHeight : 0;
+
+    try {
+      const res = await fetch(`/api/chats/${activeChatId}/messages?before_id=${nextCursor}`);
+      const data = await res.json();
+
+      setMessages(prev => [...data.messages, ...prev]);
+      setNextCursor(data.next_cursor);
+
+      setTimeout(() => {
+        if (container) {
+          container.scrollTop = container.scrollHeight - oldScrollHeight;
+        }
+      }, 10);
+
+    } catch (e) {
+      console.error("Failed to load more", e);
+    } finally {
+      setIsLoadingHistory(false);
+    }
   };
 
   useEffect(() => {
@@ -123,6 +198,7 @@ export default function Home() {
             content: data.content
           }];
         });
+        scrollToBottom();
       }
 
       if (data.type === "message.done") {
@@ -130,7 +206,6 @@ export default function Home() {
         setCurrentTaskId(null);
 
         setMessages(prev => {
-          // Ищем последнее сообщение ассистента для замены
           const lastAssistantIdx = prev.findLastIndex(m => m.role === "assistant");
 
           if (lastAssistantIdx !== -1) {
@@ -142,6 +217,7 @@ export default function Home() {
         });
 
         loadData();
+        setTimeout(scrollToBottom, 50);
 
         if (data.message.role === "system") {
           setTimeout(() => {
@@ -206,7 +282,7 @@ export default function Home() {
     }
 
     setChats([newChat, ...chats]);
-    setActiveChatId(newChat.id);
+    handleChatSelect(newChat.id);
 
     await sendToBackend(newChat.id, prompt);
   };
@@ -230,7 +306,6 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task_id: currentTaskId }),
       });
-      // Ждем message.done от воркера
     } catch (e) {
       console.error("Failed to cancel", e);
     }
@@ -253,6 +328,7 @@ export default function Home() {
     } else {
       const tempMsg: Message = { id: Date.now(), chat_id: activeChatId, role: "user", content: prompt };
       setMessages(prev => [...prev, tempMsg]);
+      setTimeout(scrollToBottom, 50);
       await sendToBackend(activeChatId, prompt);
     }
   };
@@ -270,10 +346,10 @@ export default function Home() {
 
     await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
     setChats(chats.filter(c => c.id !== chatId));
-    if (activeChatId === chatId) setActiveChatId(null);
+    if (activeChatId === chatId) {
+      handleChatSelect(null);
+    }
   };
-
-  useEffect(() => { loadData(); }, []);
 
   const canSend = hasConnections && (activeChatId ? !!activeChat?.model_name : !!newChatSettings.model_name);
 
@@ -282,7 +358,7 @@ export default function Home() {
 
       <div className="w-[260px] bg-[#171719] flex flex-col border-r border-neutral-800">
         <div className="p-4">
-          <button onClick={() => setActiveChatId(null)} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-neutral-800 transition-colors text-sm font-medium">
+          <button onClick={() => handleChatSelect(null)} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-neutral-800 transition-colors text-sm font-medium">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
             Новый чат
           </button>
@@ -292,7 +368,7 @@ export default function Home() {
           {chats.map(chat => (
             <div
               key={chat.id}
-              onClick={() => setActiveChatId(chat.id)}
+              onClick={() => handleChatSelect(chat.id)}
               className={`group relative p-2 pr-8 rounded-lg cursor-pointer text-sm truncate transition-colors ${activeChatId === chat.id ? "bg-neutral-800 font-medium" : "hover:bg-neutral-800/50"}`}
             >
               {chat.title}
@@ -370,7 +446,19 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto p-6 space-y-6"
+              onScroll={(e) => {
+                if (e.currentTarget.scrollTop === 0 && nextCursor && !isLoadingHistory) {
+                  loadMoreMessages();
+                }
+              }}
+            >
+              {isLoadingHistory && (
+                <div className="text-center text-xs text-neutral-500 py-2">Загрузка истории...</div>
+              )}
+
               {messages.map((m) => (
                 <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div className={`text-[15px] leading-relaxed ${
@@ -461,5 +549,13 @@ export default function Home() {
         onSaveSettings={handleSaveSettings}
       />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center bg-[#0f0f11] text-neutral-400">Загрузка...</div>}>
+      <ChatPage />
+    </Suspense>
   );
 }
