@@ -24,7 +24,7 @@ export default function Home() {
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null); // Хранилище для сокета
+  const wsRef = useRef<WebSocket | null>(null);
 
   const activeChat = chats.find(c => c.id === activeChatId);
 
@@ -46,7 +46,6 @@ export default function Home() {
     setMessages(data.messages);
   };
 
-  // Эффект для WebSocket
   useEffect(() => {
     if (!activeChatId) {
       if (wsRef.current) {
@@ -58,9 +57,7 @@ export default function Home() {
 
     loadMessages(activeChatId);
 
-    // Определяем протокол (ws или wss)
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    // Обратите внимание: URL может отличаться, если фронт не на localhost
     const wsUrl = `${protocol}//localhost:8000/ws/chat/${activeChatId}`;
 
     const ws = new WebSocket(wsUrl);
@@ -70,14 +67,19 @@ export default function Home() {
       const data = JSON.parse(event.data);
       if (data.type === "message.new") {
         setMessages(prev => [...prev, data.message]);
-        setIsLoading(false); // Отключаем индикатор "печатает..."
-        loadChats(); // Обновляем заголовки, если они изменились
+        setIsLoading(false);
+        loadChats();
+
+        if (data.message.role === "system") {
+          setTimeout(() => {
+            setMessages(prev => prev.filter(m => m.id !== data.message.id));
+          }, 5000);
+        }
       }
     };
 
     ws.onerror = (e) => console.error("WebSocket error", e);
 
-    // Очистка при переключении чата или размонтировании
     return () => {
       ws.close();
     };
@@ -119,7 +121,6 @@ export default function Home() {
     setChats([newChat, ...chats]);
     setActiveChatId(newChat.id);
 
-    // Отправляем сообщение (WS уже подключится в useEffect при смене activeChatId)
     await sendToBackend(newChat.id, prompt);
   };
 
@@ -130,7 +131,6 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, prompt }),
     });
-    // Ожидаем ответ по WebSocket
   };
 
   const handleSend = async () => {
@@ -217,8 +217,15 @@ export default function Home() {
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {messages.map((m) => (
                 <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed ${m.role === "user" ? "bg-neutral-700 text-white" : "bg-transparent text-neutral-200"}`}>
+                  <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed ${
+                    m.role === "user"
+                      ? "bg-neutral-700 text-white"
+                      : m.role === "system"
+                      ? "bg-red-900/30 text-red-200 border border-red-800/50 w-full text-center text-sm"
+                      : "bg-transparent text-neutral-200"
+                  }`}>
                     {m.role === "assistant" && <div className="font-semibold text-xs mb-1 text-neutral-400">Ollama</div>}
+                    {m.role === "system" && <div className="font-semibold text-xs mb-1">Система</div>}
                     {m.content}
                   </div>
                 </div>

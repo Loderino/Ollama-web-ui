@@ -33,7 +33,7 @@ async def create_connection(data: ConnectionCreate, db: AsyncSession = Depends(g
     if "localhost" in url_str or "127.0.0.1" in url_str:
         url_str = url_str.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
 
-    connection = Connection(label=data.label, base_url=url_str)
+    connection = Connection(label=data.label, base_url=url_str, api_key=data.api_key)
     db.add(connection)
     await db.commit()
     await db.refresh(connection)
@@ -66,9 +66,13 @@ async def get_connection_models(connection_id: int, db: AsyncSession = Depends(g
 
     url = f"{connection.base_url.rstrip('/')}/api/tags"
 
+    headers = {}
+    if connection.api_key:
+        headers["Authorization"] = f"Bearer {connection.api_key}"
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url)
+            response = await client.get(url, headers=headers)
             response.raise_for_status()
             return response.json()
     except httpx.RequestError as err:

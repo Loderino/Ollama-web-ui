@@ -1,17 +1,19 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, HttpUrl
+from pydantic import BaseModel, ConfigDict
 
 
 class ConnectionCreate(BaseModel):
     label: str
-    base_url: HttpUrl
+    base_url: str
+    api_key: str | None = None
 
 
 class ConnectionResponse(BaseModel):
     id: int
     label: str
     base_url: str
+    api_key: str | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

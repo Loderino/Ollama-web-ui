@@ -17,6 +17,6 @@ export type Chat = {
 export type Message = {
   id: number;
   chat_id: number;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
 };

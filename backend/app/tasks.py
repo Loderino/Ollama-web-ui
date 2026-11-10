@@ -1,4 +1,5 @@
 import json
+import time
 
 import httpx
 import redis
@@ -40,6 +41,11 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
         temperature = chat.temperature
         top_k = chat.top_k
         top_p = chat.top_p
+        api_key = connection.api_key
+
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     url = f"{ollama_url.rstrip('/')}/api/chat"
     options = {}
@@ -52,21 +58,43 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
 
     payload = {"model": model, "messages": ollama_messages, "stream": False, "options": options}
 
-    with httpx.Client(timeout=300.0) as client:
-        response = client.post(url, json=payload)
-        response.raise_for_status()
-        data = response.json()
+    answer = ""
+    is_error = False
 
-    answer = data.get("message", {}).get("content", "")
+    try:
+        with httpx.Client(timeout=300.0) as client:
+            response = client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            answer = data.get("message", {}).get("content", "")
+    except httpx.HTTPStatusError as e:
+        is_error = True
+        answer = f"Ошибка сервера: HTTP {e.response.status_code}. {e.response.text}"
+    except httpx.RequestError:
+        is_error = True
+        answer = "Не удалось подключиться к серверу Ollama."
+
+    r = redis.from_url(settings.redis_url)
+
+    if is_error:
+        event = {
+            "type": "message.new",
+            "message": {
+                "id": int(time.time() * 1000),
+                "chat_id": chat_id,
+                "role": "system",
+                "content": answer,
+            },
+        }
+        r.publish(f"chat_{chat_id}", json.dumps(event))
+        return answer
 
     with SyncSessionLocal() as db:
         assistant_msg = Message(chat_id=chat_id, role="assistant", content=answer)
         db.add(assistant_msg)
         db.commit()
-
         msg_id = assistant_msg.id
 
-    r = redis.from_url(settings.redis_url)
     event = {
         "type": "message.new",
         "message": {"id": msg_id, "chat_id": chat_id, "role": "assistant", "content": answer},

@@ -6,13 +6,14 @@ type Connection = {
   id: number;
   label: string;
   base_url: string;
-  is_valid?: boolean; // Добавляем локальное поле
+  is_valid?: boolean;
 };
 
 export default function ConnectionsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [label, setLabel] = useState("");
   const [url, setUrl] = useState("http://localhost:11434");
+  const [apiKey, setApiKey] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [error, setError] = useState("");
 
@@ -20,7 +21,6 @@ export default function ConnectionsModal({ isOpen, onClose }: { isOpen: boolean;
     const res = await fetch("/api/connections");
     const data = await res.json();
     if (Array.isArray(data)) {
-      // Проверяем каждое подключение
       const validated = await Promise.all(data.map(async (c: Connection) => {
         try {
           const check = await fetch(`/api/connections/${c.id}/models`);
@@ -42,12 +42,11 @@ export default function ConnectionsModal({ isOpen, onClose }: { isOpen: boolean;
       const res = await fetch("/api/connections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label, base_url: url }),
+        body: JSON.stringify({ label, base_url: url, api_key: apiKey || null }),
       });
 
       if (!res.ok) throw new Error("Ошибка при сохранении");
 
-      // Проверяем, работает ли
       const newConn = await res.json();
       const check = await fetch(`/api/connections/${newConn.id}/models`);
 
@@ -56,6 +55,7 @@ export default function ConnectionsModal({ isOpen, onClose }: { isOpen: boolean;
       } else {
         setLabel("");
         setUrl("http://localhost:11434");
+        setApiKey("");
       }
 
       await loadAndValidate();
@@ -67,7 +67,7 @@ export default function ConnectionsModal({ isOpen, onClose }: { isOpen: boolean;
   }
 
   async function remove(id: number) {
-    if (!confirm("Удалить это подключение? Все чаты, связанные с ним, тоже удалятся.")) return;
+    if (!confirm("Удалить это подключение? Все чаты, связанные с ним, потеряют модель.")) return;
     await fetch(`/api/connections/${id}`, { method: "DELETE" });
     await loadAndValidate();
   }
@@ -94,6 +94,12 @@ export default function ConnectionsModal({ isOpen, onClose }: { isOpen: boolean;
             className="w-full bg-[#0f0f11] border border-neutral-800 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-neutral-500"
             placeholder="URL (http://...)"
             value={url} onChange={(e) => setUrl(e.target.value)} required
+          />
+          <input
+            type="password"
+            className="w-full bg-[#0f0f11] border border-neutral-800 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-neutral-500"
+            placeholder="API Key (если требуется)"
+            value={apiKey} onChange={(e) => setApiKey(e.target.value)}
           />
           {error && <div className="text-red-400 text-xs">{error}</div>}
           <button disabled={isAdding} className="w-full bg-white text-black font-medium py-2.5 rounded-lg hover:bg-neutral-200 transition-colors text-sm disabled:opacity-50">

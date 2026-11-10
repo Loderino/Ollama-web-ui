@@ -14,6 +14,7 @@ class Connection(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     label: Mapped[str] = mapped_column(String(100))
     base_url: Mapped[str] = mapped_column(String(255))
+    api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     chats: Mapped[list["Chat"]] = relationship(back_populates="connection")
