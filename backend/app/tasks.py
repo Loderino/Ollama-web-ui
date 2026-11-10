@@ -1,7 +1,11 @@
+import json
+
 import httpx
+import redis
 from sqlalchemy import select
 
 from app.celery_app import celery_app
+from app.config import settings
 from app.database import SyncSessionLocal
 from app.models import Chat, Connection, Message
 
@@ -59,5 +63,14 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
         assistant_msg = Message(chat_id=chat_id, role="assistant", content=answer)
         db.add(assistant_msg)
         db.commit()
+
+        msg_id = assistant_msg.id
+
+    r = redis.from_url(settings.redis_url)
+    event = {
+        "type": "message.new",
+        "message": {"id": msg_id, "chat_id": chat_id, "role": "assistant", "content": answer},
+    }
+    r.publish(f"chat_{chat_id}", json.dumps(event))
 
     return answer

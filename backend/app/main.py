@@ -1,8 +1,10 @@
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query
+import redis.asyncio as aioredis
+from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models import Chat, Connection, Message
 from app.schemas import (
@@ -161,3 +163,24 @@ async def get_messages(
     next_cursor = messages[0].id if len(messages) == limit else None
 
     return {"messages": messages, "next_cursor": next_cursor}
+
+
+@app.websocket("/ws/chat/{chat_id}")
+async def websocket_endpoint(websocket: WebSocket, chat_id: int):
+    await websocket.accept()
+
+    r = aioredis.from_url(settings.redis_url)
+    pubsub = r.pubsub()
+    channel_name = f"chat_{chat_id}"
+    await pubsub.subscribe(channel_name)
+
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                await websocket.send_text(message["data"].decode())
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await pubsub.unsubscribe(channel_name)
+        await pubsub.close()
+        await r.close()

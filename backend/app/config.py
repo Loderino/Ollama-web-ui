@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     rabbitmq_host: str = "rabbitmq"
     rabbitmq_port: int = 5672
     celery_result_backend: str = "rpc://"
+    redis_url: str = "redis://redis:6379/0"
 
     @computed_field
     @property

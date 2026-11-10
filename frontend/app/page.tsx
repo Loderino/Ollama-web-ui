@@ -12,11 +12,9 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Состояния для модалок
   const [isConnectionsOpen, setIsConnectionsOpen] = useState(false);
   const [isChatSettingsOpen, setIsChatSettingsOpen] = useState(false);
 
-  // Настройки для НОВОГО чата (до его создания)
   const [newChatSettings, setNewChatSettings] = useState<Partial<Chat>>({
     model_name: null,
     connection_id: null,
@@ -25,10 +23,9 @@ export default function Home() {
     top_p: 0.9
   });
 
-  // Для удаления чатов
-  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null); // Хранилище для сокета
+
   const activeChat = chats.find(c => c.id === activeChatId);
 
   const scrollToBottom = () => {
@@ -49,19 +46,45 @@ export default function Home() {
     setMessages(data.messages);
   };
 
-  const deleteChat = async (chatId: number, e: React.MouseEvent) => {
-    e.stopPropagation(); // Чтобы не открылся сам чат
-    if (!confirm("Удалить этот чат?")) return;
+  // Эффект для WebSocket
+  useEffect(() => {
+    if (!activeChatId) {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      return;
+    }
 
-    await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
-    setChats(chats.filter(c => c.id !== chatId));
-    if (activeChatId === chatId) setActiveChatId(null);
-    setOpenMenuId(null);
-  };
+    loadMessages(activeChatId);
+
+    // Определяем протокол (ws или wss)
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    // Обратите внимание: URL может отличаться, если фронт не на localhost
+    const wsUrl = `${protocol}//localhost:8000/ws/chat/${activeChatId}`;
+
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "message.new") {
+        setMessages(prev => [...prev, data.message]);
+        setIsLoading(false); // Отключаем индикатор "печатает..."
+        loadChats(); // Обновляем заголовки, если они изменились
+      }
+    };
+
+    ws.onerror = (e) => console.error("WebSocket error", e);
+
+    // Очистка при переключении чата или размонтировании
+    return () => {
+      ws.close();
+    };
+  }, [activeChatId]);
 
   const handleSaveSettings = async (settings: Partial<Chat>) => {
     if (activeChatId) {
-      // Обновляем существующий чат
       await fetch(`/api/chats/${activeChatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -69,13 +92,11 @@ export default function Home() {
       });
       loadChats();
     } else {
-      // Сохраняем настройки для будущего чата
       setNewChatSettings(prev => ({ ...prev, ...settings }));
     }
   };
 
   const createChatAndSend = async (prompt: string) => {
-    // Создаем чат с уже выбранными настройками (или дефолтными)
     const res = await fetch("/api/chats", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -86,8 +107,7 @@ export default function Home() {
     });
     let newChat = await res.json();
 
-    // Если были выбраны настройки, применяем их
-    if (newChatSettings.model_name || newChatSettings.temperature !== 0.7) {
+    if (newChatSettings.model_name) {
       const patchRes = await fetch(`/api/chats/${newChat.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -98,6 +118,8 @@ export default function Home() {
 
     setChats([newChat, ...chats]);
     setActiveChatId(newChat.id);
+
+    // Отправляем сообщение (WS уже подключится в useEffect при смене activeChatId)
     await sendToBackend(newChat.id, prompt);
   };
 
@@ -108,24 +130,7 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, prompt }),
     });
-
-    let attempts = 0;
-    const interval = setInterval(async () => {
-      const res = await fetch(`/api/chats/${chatId}/messages`);
-      const data = await res.json();
-      setMessages(data.messages);
-
-      const assistantMsg = data.messages.find((m: Message) => m.role === "assistant");
-      if (assistantMsg) {
-        clearInterval(interval);
-        setIsLoading(false);
-        loadChats();
-      }
-      if (++attempts > 120) {
-        clearInterval(interval);
-        setIsLoading(false);
-      }
-    }, 1000);
+    // Ожидаем ответ по WebSocket
   };
 
   const handleSend = async () => {
@@ -142,13 +147,19 @@ export default function Home() {
     }
   };
 
+  const deleteChat = async (chatId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Удалить этот чат?")) return;
+
+    await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
+    setChats(chats.filter(c => c.id !== chatId));
+    if (activeChatId === chatId) setActiveChatId(null);
+  };
+
   useEffect(() => { loadChats(); }, []);
-  useEffect(() => {
-    if (activeChatId) loadMessages(activeChatId);
-  }, [activeChatId]);
 
   return (
-    <div className="flex h-screen bg-[#0f0f11] text-neutral-200 font-sans" onClick={() => setOpenMenuId(null)}>
+    <div className="flex h-screen bg-[#0f0f11] text-neutral-200 font-sans">
 
       {/* Боковая панель */}
       <div className="w-[260px] bg-[#171719] flex flex-col border-r border-neutral-800">
@@ -168,17 +179,8 @@ export default function Home() {
             >
               {chat.title}
 
-              {/* Кнопка удаления (появляется при наведении) */}
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm(`Удалить чат "${chat.title}"?`)) {
-                    fetch(`/api/chats/${chat.id}`, { method: "DELETE" }).then(() => {
-                      setChats(chats.filter(c => c.id !== chat.id));
-                      if (activeChatId === chat.id) setActiveChatId(null);
-                    });
-                  }
-                }}
+                onClick={(e) => deleteChat(chat.id, e)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
                 title="Удалить чат"
               >
@@ -233,7 +235,6 @@ export default function Home() {
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
-            {/* Шапка пустого чата */}
             <div className="absolute top-0 left-0 right-0 h-14 border-b border-neutral-800 flex items-center justify-end px-6 bg-[#0f0f11]">
               <button onClick={() => setIsChatSettingsOpen(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-neutral-800 transition-colors text-sm text-neutral-400">
                 <span className={newChatSettings.model_name ? "text-neutral-200" : "text-red-400"}>
@@ -277,7 +278,7 @@ export default function Home() {
       <ChatSettingsModal
         isOpen={isChatSettingsOpen}
         onClose={() => setIsChatSettingsOpen(false)}
-        chat={activeChat || { id: 0, ...newChatSettings } as Chat}
+        chat={activeChat || { id: 0, title: "", connection_id: null, model_name: null, temperature: 0.7, top_k: 40, top_p: 0.9 } as Chat}
         onSaveSettings={handleSaveSettings}
       />
     </div>
