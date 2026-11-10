@@ -61,6 +61,7 @@ class ChatUpdate(BaseModel):
     temperature: float | None = None
     top_k: int | None = None
     top_p: float | None = None
+    is_streaming: bool | None = None
 
 
 class ChatResponse(BaseModel):
@@ -71,6 +72,7 @@ class ChatResponse(BaseModel):
     temperature: float | None
     top_k: int | None
     top_p: float | None
+    is_streaming: bool | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

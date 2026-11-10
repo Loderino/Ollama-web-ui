@@ -12,6 +12,7 @@ export type Chat = {
   temperature: number | null;
   top_k: number | null;
   top_p: number | null;
+  is_streaming: boolean
 };
 
 export type Message = {

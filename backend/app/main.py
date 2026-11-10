@@ -19,7 +19,7 @@ from app.schemas import (
     MessageListResponse,
     OllamaTagsResponse,
 )
-from app.tasks import generate_ollama_response
+from app.tasks import generate_ollama_response, generate_ollama_response_stream
 
 app = FastAPI(title="Ollama Web UI")
 
@@ -161,13 +161,14 @@ async def get_messages(
 @app.post("/generate")
 async def generate(request: GenerateRequest, db: AsyncSession = Depends(get_db)):
     chat = await db.get(Chat, request.chat_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
+    if not chat or not chat.model_name:
+        raise HTTPException(status_code=400, detail="Chat not configured")
 
-    task = generate_ollama_response.delay(
-        chat_id=request.chat_id,
-        prompt=request.prompt,
-    )
+    if chat.is_streaming:
+        task = generate_ollama_response_stream.delay(chat_id=request.chat_id, prompt=request.prompt)
+    else:
+        task = generate_ollama_response.delay(chat_id=request.chat_id, prompt=request.prompt)
+
     return {"task_id": task.id}
 
 

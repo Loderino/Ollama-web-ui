@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -32,6 +32,7 @@ class Chat(Base):
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     top_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
     top_p: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_streaming: Mapped[bool] = mapped_column(Boolean, default=True)  # По умолчанию включено
 
     connection: Mapped["Connection"] = relationship(back_populates="chats")
     messages: Mapped[list["Message"]] = relationship(back_populates="chat", cascade="all, delete-orphan")

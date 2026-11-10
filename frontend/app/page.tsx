@@ -23,7 +23,8 @@ export default function Home() {
     connection_id: null,
     temperature: 0.7,
     top_k: 40,
-    top_p: 0.9
+    top_p: 0.9,
+    is_streaming: true
   });
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -106,10 +107,40 @@ export default function Home() {
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === "message.new") {
-        setMessages(prev => [...prev, data.message]);
+
+      if (data.type === "message.chunk") {
+        setMessages(prev => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === "assistant") {
+            const updated = [...prev];
+            updated[updated.length - 1] = { ...last, content: last.content + data.content };
+            return updated;
+          }
+          return [...prev, {
+            id: Date.now(),
+            chat_id: data.chat_id,
+            role: "assistant",
+            content: data.content
+          }];
+        });
+      }
+
+      if (data.type === "message.done") {
         setIsLoading(false);
         setCurrentTaskId(null);
+
+        setMessages(prev => {
+          // Ищем последнее сообщение ассистента для замены
+          const lastAssistantIdx = prev.findLastIndex(m => m.role === "assistant");
+
+          if (lastAssistantIdx !== -1) {
+            const updated = [...prev];
+            updated[lastAssistantIdx] = data.message;
+            return updated;
+          }
+          return [...prev, data.message];
+        });
+
         loadData();
 
         if (data.message.role === "system") {
@@ -199,18 +230,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task_id: currentTaskId }),
       });
-      setIsLoading(false);
-      setCurrentTaskId(null);
-
-      const sysMsg: Message = {
-        id: Date.now(),
-        chat_id: activeChatId || 0,
-        role: "system",
-        content: "Генерация отменена."
-      };
-      setMessages(prev => [...prev, sysMsg]);
-      setTimeout(() => setMessages(prev => prev.filter(m => m.id !== sysMsg.id)), 3000);
-
+      // Ждем message.done от воркера
     } catch (e) {
       console.error("Failed to cancel", e);
     }
@@ -371,7 +391,7 @@ export default function Home() {
                 </div>
               ))}
 
-              {isLoading && (
+              {isLoading && messages.length > 0 && messages[messages.length - 1].role !== "assistant" && (
                 <div className="flex justify-start">
                   <div className="text-sm text-neutral-500 animate-pulse flex items-center gap-2 py-2">
                     <span className="w-1.5 h-1.5 bg-neutral-500 rounded-full animate-ping"></span>
@@ -437,7 +457,7 @@ export default function Home() {
       <ChatSettingsModal
         isOpen={isChatSettingsOpen}
         onClose={() => setIsChatSettingsOpen(false)}
-        chat={activeChat || { id: 0, title: "", connection_id: null, model_name: null, temperature: 0.7, top_k: 40, top_p: 0.9 } as Chat}
+        chat={activeChat || { id: 0, title: "", connection_id: null, model_name: null, temperature: 0.7, top_k: 40, top_p: 0.9, is_streaming: true } as Chat}
         onSaveSettings={handleSaveSettings}
       />
     </div>

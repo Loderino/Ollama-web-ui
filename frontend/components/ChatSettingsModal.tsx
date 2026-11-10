@@ -28,6 +28,7 @@ export default function ChatSettingsModal({
   const [temperature, setTemperature] = useState(chat.temperature ?? 0.7);
   const [topK, setTopK] = useState(chat.top_k ?? 40);
   const [topP, setTopP] = useState(chat.top_p ?? 0.9);
+  const [isStreaming, setIsStreaming] = useState(chat.is_streaming ?? true);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -91,6 +92,7 @@ export default function ChatSettingsModal({
       temperature,
       top_k: topK,
       top_p: topP,
+      is_streaming: isStreaming,
     };
 
     try {
@@ -187,7 +189,6 @@ export default function ChatSettingsModal({
           {/* Компактные числовые поля в ряд */}
           <div className="grid grid-cols-3 gap-3">
 
-            {/* Temperature */}
             <div>
               <label className="block text-[11px] text-neutral-400 mb-1 truncate">Temperature</label>
               <div className="flex items-center bg-[#0f0f11] border border-neutral-800 rounded-lg overflow-hidden h-9">
@@ -196,9 +197,7 @@ export default function ChatSettingsModal({
                   className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
                 >-</button>
                 <input
-                  type="number"
-                  step="0.1" min="0" max="2"
-                  value={temperature}
+                  type="number" step="0.1" min="0" max="2" value={temperature}
                   onChange={(e) => setTemperature(Math.max(0, Math.min(2, parseFloat(e.target.value) || 0)))}
                   className="w-full bg-transparent text-center text-xs text-neutral-200 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
@@ -209,7 +208,6 @@ export default function ChatSettingsModal({
               </div>
             </div>
 
-            {/* Top K */}
             <div>
               <label className="block text-[11px] text-neutral-400 mb-1 truncate">Top K</label>
               <div className="flex items-center bg-[#0f0f11] border border-neutral-800 rounded-lg overflow-hidden h-9">
@@ -218,9 +216,7 @@ export default function ChatSettingsModal({
                   className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
                 >-</button>
                 <input
-                  type="number"
-                  step="1" min="1" max="100"
-                  value={topK}
+                  type="number" step="1" min="1" max="100" value={topK}
                   onChange={(e) => setTopK(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
                   className="w-full bg-transparent text-center text-xs text-neutral-200 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
@@ -231,7 +227,6 @@ export default function ChatSettingsModal({
               </div>
             </div>
 
-            {/* Top P */}
             <div>
               <label className="block text-[11px] text-neutral-400 mb-1 truncate">Top P</label>
               <div className="flex items-center bg-[#0f0f11] border border-neutral-800 rounded-lg overflow-hidden h-9">
@@ -240,9 +235,7 @@ export default function ChatSettingsModal({
                   className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
                 >-</button>
                 <input
-                  type="number"
-                  step="0.05" min="0" max="1"
-                  value={topP}
+                  type="number" step="0.05" min="0" max="1" value={topP}
                   onChange={(e) => setTopP(Math.max(0, Math.min(1, parseFloat(e.target.value) || 0)))}
                   className="w-full bg-transparent text-center text-xs text-neutral-200 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
@@ -253,6 +246,18 @@ export default function ChatSettingsModal({
               </div>
             </div>
 
+          </div>
+
+          {/* Переключатель стриминга */}
+          <div className="flex items-center justify-between pt-2">
+            <label className="text-sm text-neutral-300">Потоковый ответ</label>
+            <button
+              type="button"
+              onClick={() => setIsStreaming(!isStreaming)}
+              className={`w-10 h-5 rounded-full transition-colors relative ${isStreaming ? 'bg-white' : 'bg-neutral-700'}`}
+            >
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${isStreaming ? 'bg-black left-[22px]' : 'bg-neutral-400 left-0.5'}`} />
+            </button>
           </div>
 
           <button
