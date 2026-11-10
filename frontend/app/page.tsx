@@ -24,8 +24,12 @@ export default function Home() {
     top_p: 0.9
   });
 
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitleValue, setEditTitleValue] = useState("");
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const activeChat = chats.find(c => c.id === activeChatId);
 
@@ -33,9 +37,15 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  useEffect(() => { scrollToBottom(); }, [messages]);
+  useEffect(() => { scrollToBottom(); }, [messages, isLoading]);
 
-  // Загрузка чатов и проверка наличия подключений
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 150) + "px";
+    }
+  }, [input]);
+
   const loadData = async () => {
     const chatsRes = await fetch("/api/chats");
     setChats(await chatsRes.json());
@@ -76,6 +86,7 @@ export default function Home() {
     }
   }, [hasConnections, newChatSettings.model_name]);
 
+  // WebSocket
   useEffect(() => {
     if (!activeChatId) {
       if (wsRef.current) {
@@ -98,7 +109,7 @@ export default function Home() {
       if (data.type === "message.new") {
         setMessages(prev => [...prev, data.message]);
         setIsLoading(false);
-        loadData(); // Обновить чаты
+        loadData();
 
         if (data.message.role === "system") {
           setTimeout(() => {
@@ -110,9 +121,7 @@ export default function Home() {
 
     ws.onerror = (e) => console.error("WebSocket error", e);
 
-    return () => {
-      ws.close();
-    };
+    return () => { ws.close(); };
   }, [activeChatId]);
 
   const handleSaveSettings = async (settings: Partial<Chat>) => {
@@ -126,6 +135,22 @@ export default function Home() {
     } else {
       setNewChatSettings(prev => ({ ...prev, ...settings }));
     }
+  };
+
+  const updateChatTitle = async () => {
+    if (!activeChatId || !editTitleValue.trim() || editTitleValue === activeChat?.title) {
+      setIsEditingTitle(false);
+      return;
+    }
+
+    await fetch(`/api/chats/${activeChatId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: editTitleValue.trim() }),
+    });
+
+    setIsEditingTitle(false);
+    loadData();
   };
 
   const createChatAndSend = async (prompt: string) => {
@@ -166,14 +191,13 @@ export default function Home() {
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
-    // Запрет на отправку без выбора модели
     const currentModel = activeChatId ? activeChat?.model_name : newChatSettings.model_name;
     if (!currentModel) {
       alert("Сначала выберите модель в правом верхнем углу.");
       return;
     }
 
-    const prompt = input;
+    const prompt = input.trim();
     setInput("");
 
     if (!activeChatId) {
@@ -182,6 +206,13 @@ export default function Home() {
       const tempMsg: Message = { id: Date.now(), chat_id: activeChatId, role: "user", content: prompt };
       setMessages(prev => [...prev, tempMsg]);
       await sendToBackend(activeChatId, prompt);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
+      e.preventDefault();
+      handleSend();
     }
   };
 
@@ -222,7 +253,6 @@ export default function Home() {
               <button
                 onClick={(e) => deleteChat(chat.id, e)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
-                title="Удалить чат"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -258,8 +288,36 @@ export default function Home() {
         ) : activeChatId ? (
           <>
             <div className="h-14 border-b border-neutral-800 flex items-center justify-between px-6 bg-[#0f0f11]">
-              <div className="font-semibold text-sm">{activeChat?.title || "Чат"}</div>
-              <button onClick={() => setIsChatSettingsOpen(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-neutral-800 transition-colors text-sm text-neutral-400">
+              {/* Редактируемый заголовок */}
+              <div className="flex-1 flex items-center min-w-0 mr-4">
+                {isEditingTitle ? (
+                  <input
+                    autoFocus
+                    className="bg-transparent text-sm font-semibold text-white outline-none border-b border-neutral-500 w-full max-w-[300px]"
+                    value={editTitleValue}
+                    onChange={(e) => setEditTitleValue(e.target.value)}
+                    onBlur={updateChatTitle}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") updateChatTitle();
+                      if (e.key === "Escape") setIsEditingTitle(false);
+                    }}
+                  />
+                ) : (
+                  <div
+                    onClick={() => {
+                      if (activeChat) {
+                        setEditTitleValue(activeChat.title);
+                        setIsEditingTitle(true);
+                      }
+                    }}
+                    className="font-semibold text-sm cursor-pointer hover:text-neutral-400 transition-colors truncate"
+                  >
+                    {activeChat?.title || "Чат"}
+                  </div>
+                )}
+              </div>
+
+              <button onClick={() => setIsChatSettingsOpen(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-neutral-800 transition-colors text-sm text-neutral-400 shrink-0">
                 <span className={activeChat?.model_name ? "text-neutral-200" : "text-red-400"}>
                   {activeChat?.model_name || "Выбрать модель"}
                 </span>
@@ -270,7 +328,7 @@ export default function Home() {
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {messages.map((m) => (
                 <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed ${
+                  <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed whitespace-pre-wrap ${
                     m.role === "user"
                       ? "bg-neutral-700 text-white"
                       : m.role === "system"
@@ -285,8 +343,9 @@ export default function Home() {
               ))}
               {isLoading && (
                 <div className="flex justify-start">
-                  <div className="bg-transparent text-neutral-400 flex items-center gap-2">
-                    <span className="animate-pulse">●</span> <span className="animate-pulse delay-100">●</span> <span className="animate-pulse delay-200">●</span>
+                  <div className="text-sm text-neutral-500 animate-pulse flex items-center gap-2 py-2">
+                    <span className="w-1.5 h-1.5 bg-neutral-500 rounded-full animate-ping"></span>
+                    Ollama думает...
                   </div>
                 </div>
               )}
@@ -313,19 +372,21 @@ export default function Home() {
         )}
 
         <div className="p-4 bg-[#0f0f11]">
-          <div className={`max-w-3xl mx-auto relative flex items-center bg-[#171719] border rounded-xl transition-colors ${!canSend ? 'border-red-900/50 opacity-50' : 'border-neutral-800 focus-within:border-neutral-600'}`}>
-            <input
-              className="w-full bg-transparent p-4 pr-12 text-[15px] outline-none placeholder-neutral-500"
+          <div className={`max-w-3xl mx-auto relative flex items-end bg-[#171719] border rounded-xl transition-colors ${!canSend ? 'border-red-900/50 opacity-50' : 'border-neutral-800 focus-within:border-neutral-600'}`}>
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              className="w-full bg-transparent p-4 pr-12 text-[15px] outline-none placeholder-neutral-500 resize-none max-h-[150px] overflow-y-auto"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder={!canSend ? "Выберите модель или добавьте подключение" : "Спросите что-нибудь..."}
+              onKeyDown={handleKeyDown}
+              placeholder={!canSend ? "Выберите модель или добавьте подключение" : "Спросите что-нибудь... (Shift+Enter для переноса)"}
               disabled={isLoading || !canSend}
             />
             <button
               onClick={handleSend}
               disabled={isLoading || !input.trim() || !canSend}
-              className="absolute right-2 p-2 bg-white text-black rounded-lg hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+              className="absolute right-2 bottom-2 p-2 bg-white text-black rounded-lg hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-white transition-colors"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </button>
