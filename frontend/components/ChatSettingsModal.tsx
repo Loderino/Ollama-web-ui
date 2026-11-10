@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { Chat } from "../app/types";
 
-type Connection = { id: number; label: string; base_url: string };
+type Connection = { id: number; label: string };
 type Model = {
   name: string;
   details: { parameter_size: string };
   connectionId: number;
+  connectionLabel?: string;
 };
 
 export default function ChatSettingsModal({
@@ -31,7 +32,10 @@ export default function ChatSettingsModal({
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Загрузка моделей со всех подключений
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!isOpen) return;
     setIsLoading(true);
@@ -49,11 +53,12 @@ export default function ChatSettingsModal({
               const data = await mRes.json();
               const withConn = data.models.map((m: any) => ({
                 ...m,
-                connectionId: conn.id
+                connectionId: conn.id,
+                connectionLabel: conn.label
               }));
               allModels = [...allModels, ...withConn];
             }
-          } catch (e) { /* Игнорируем упавшие подключения */ }
+          } catch (e) { /* Игнорируем упавшие */ }
         }
         setModels(allModels);
       } catch (e) {
@@ -65,6 +70,16 @@ export default function ChatSettingsModal({
 
     loadAllModels();
   }, [isOpen]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const save = async () => {
     setIsSaving(true);
@@ -90,6 +105,13 @@ export default function ChatSettingsModal({
 
   if (!isOpen) return null;
 
+  const filteredModels = models.filter(m =>
+    m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (m.connectionLabel && m.connectionLabel.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const selectedModelDisplay = models.find(m => m.name === model);
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-[#171719] border border-neutral-800 rounded-xl p-6 w-full max-w-md shadow-2xl">
@@ -99,87 +121,138 @@ export default function ChatSettingsModal({
         </div>
 
         <div className="space-y-5">
+
           {/* Выбор модели */}
-          <div>
+          <div ref={dropdownRef} className="relative">
             <label className="block text-xs text-neutral-400 mb-1">Модель</label>
-            <div className="relative">
-              <select
-                className="w-full appearance-none bg-[#0f0f11] border border-neutral-800 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-neutral-500 cursor-pointer disabled:opacity-50"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                disabled={isLoading}
-              >
-                <option value="" disabled>
-                  {isLoading ? "Загрузка моделей..." : "Выберите модель"}
-                </option>
-                {models.map((m, idx) => (
-                  <option key={`${m.connectionId}-${m.name}-${idx}`} value={m.name}>
-                    {m.name} ({m.details.parameter_size})
-                  </option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-neutral-400">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M6 9l6 6 6-6"/>
-                </svg>
+
+            <div
+              onClick={() => !isLoading && setIsDropdownOpen(!isDropdownOpen)}
+              className="w-full bg-[#0f0f11] border border-neutral-800 rounded-lg px-3 py-2.5 text-sm focus:outline-none cursor-pointer flex justify-between items-center group"
+            >
+              <div className="truncate">
+                {isLoading ? (
+                  <span className="text-neutral-500">Загрузка...</span>
+                ) : selectedModelDisplay ? (
+                  <span className="text-neutral-200">
+                    {selectedModelDisplay.name}
+                    {selectedModelDisplay.details.parameter_size && ` (${selectedModelDisplay.details.parameter_size})`}
+                  </span>
+                ) : (
+                  <span className="text-neutral-500">Выберите модель</span>
+                )}
               </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`text-neutral-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}>
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
             </div>
-            {models.length === 0 && !isLoading && (
-              <p className="text-xs text-red-400 mt-1">
-                Нет доступных моделей. Проверьте подключения.
-              </p>
+
+            {isDropdownOpen && (
+              <div className="absolute z-10 w-full mt-1 bg-[#171719] border border-neutral-800 rounded-lg shadow-2xl overflow-hidden">
+                <div className="p-2 border-b border-neutral-800">
+                  <input
+                    type="text"
+                    placeholder="Поиск моделей..."
+                    className="w-full bg-[#0f0f11] border border-neutral-800 rounded px-2 py-1.5 text-sm outline-none focus:border-neutral-500 text-neutral-200 placeholder-neutral-600"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+                <div className="max-h-60 overflow-y-auto p-1">
+                  {filteredModels.length === 0 ? (
+                    <div className="text-sm text-neutral-500 text-center py-4">Ничего не найдено</div>
+                  ) : (
+                    filteredModels.map((m, idx) => (
+                      <div
+                        key={`${m.connectionId}-${m.name}-${idx}`}
+                        onClick={() => { setModel(m.name); setIsDropdownOpen(false); setSearchQuery(""); }}
+                        className={`px-3 py-2 text-sm rounded-md cursor-pointer flex flex-col gap-0.5 transition-colors ${model === m.name ? "bg-neutral-800" : "hover:bg-neutral-800/50"}`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="text-neutral-200 font-medium">{m.name}</span>
+                          {m.details.parameter_size && (
+                            <span className="text-xs text-neutral-500 bg-neutral-900 px-1.5 py-0.5 rounded">{m.details.parameter_size}</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-neutral-500">{m.connectionLabel}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Ползунки */}
-          <div className="space-y-4">
+          {/* Компактные числовые поля в ряд */}
+          <div className="grid grid-cols-3 gap-3">
+
+            {/* Temperature */}
             <div>
-              <div className="flex justify-between text-xs text-neutral-400 mb-2">
-                <span>Temperature</span>
-                <span className="text-white font-mono">{temperature.toFixed(1)}</span>
+              <label className="block text-[11px] text-neutral-400 mb-1 truncate">Temperature</label>
+              <div className="flex items-center bg-[#0f0f11] border border-neutral-800 rounded-lg overflow-hidden h-9">
+                <button
+                  onClick={() => setTemperature(Math.max(0, Number((temperature - 0.1).toFixed(1))))}
+                  className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
+                >-</button>
+                <input
+                  type="number"
+                  step="0.1" min="0" max="2"
+                  value={temperature}
+                  onChange={(e) => setTemperature(Math.max(0, Math.min(2, parseFloat(e.target.value) || 0)))}
+                  className="w-full bg-transparent text-center text-xs text-neutral-200 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <button
+                  onClick={() => setTemperature(Math.min(2, Number((temperature + 0.1).toFixed(1))))}
+                  className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
+                >+</button>
               </div>
-              <input
-                type="range"
-                min="0"
-                max="2"
-                step="0.1"
-                value={temperature}
-                onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-white"
-              />
             </div>
 
+            {/* Top K */}
             <div>
-              <div className="flex justify-between text-xs text-neutral-400 mb-2">
-                <span>Top K</span>
-                <span className="text-white font-mono">{topK}</span>
+              <label className="block text-[11px] text-neutral-400 mb-1 truncate">Top K</label>
+              <div className="flex items-center bg-[#0f0f11] border border-neutral-800 rounded-lg overflow-hidden h-9">
+                <button
+                  onClick={() => setTopK(Math.max(1, topK - 1))}
+                  className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
+                >-</button>
+                <input
+                  type="number"
+                  step="1" min="1" max="100"
+                  value={topK}
+                  onChange={(e) => setTopK(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                  className="w-full bg-transparent text-center text-xs text-neutral-200 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <button
+                  onClick={() => setTopK(Math.min(100, topK + 1))}
+                  className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
+                >+</button>
               </div>
-              <input
-                type="range"
-                min="1"
-                max="100"
-                step="1"
-                value={topK}
-                onChange={(e) => setTopK(parseInt(e.target.value))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-white"
-              />
             </div>
 
+            {/* Top P */}
             <div>
-              <div className="flex justify-between text-xs text-neutral-400 mb-2">
-                <span>Top P</span>
-                <span className="text-white font-mono">{topP.toFixed(2)}</span>
+              <label className="block text-[11px] text-neutral-400 mb-1 truncate">Top P</label>
+              <div className="flex items-center bg-[#0f0f11] border border-neutral-800 rounded-lg overflow-hidden h-9">
+                <button
+                  onClick={() => setTopP(Math.max(0, Number((topP - 0.05).toFixed(2))))}
+                  className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
+                >-</button>
+                <input
+                  type="number"
+                  step="0.05" min="0" max="1"
+                  value={topP}
+                  onChange={(e) => setTopP(Math.max(0, Math.min(1, parseFloat(e.target.value) || 0)))}
+                  className="w-full bg-transparent text-center text-xs text-neutral-200 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <button
+                  onClick={() => setTopP(Math.min(1, Number((topP + 0.05).toFixed(2))))}
+                  className="px-2 h-full text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors"
+                >+</button>
               </div>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={topP}
-                onChange={(e) => setTopP(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-white"
-              />
             </div>
+
           </div>
 
           <button

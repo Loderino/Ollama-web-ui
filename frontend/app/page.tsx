@@ -11,6 +11,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [hasConnections, setHasConnections] = useState<boolean | null>(null);
 
   const [isConnectionsOpen, setIsConnectionsOpen] = useState(false);
   const [isChatSettingsOpen, setIsChatSettingsOpen] = useState(false);
@@ -34,10 +35,14 @@ export default function Home() {
 
   useEffect(() => { scrollToBottom(); }, [messages]);
 
-  const loadChats = async () => {
-    const res = await fetch("/api/chats");
-    const data = await res.json();
-    setChats(data);
+  // Загрузка чатов и проверка наличия подключений
+  const loadData = async () => {
+    const chatsRes = await fetch("/api/chats");
+    setChats(await chatsRes.json());
+
+    const connRes = await fetch("/api/connections");
+    const conns = await connRes.json();
+    setHasConnections(conns.length > 0);
   };
 
   const loadMessages = async (chatId: number) => {
@@ -45,6 +50,31 @@ export default function Home() {
     const data = await res.json();
     setMessages(data.messages);
   };
+
+  // Автовыбор первой модели для нового чата
+  useEffect(() => {
+    if (hasConnections && !newChatSettings.model_name) {
+      async function pickDefaultModel() {
+        const connsRes = await fetch("/api/connections");
+        const conns = await connsRes.json();
+        if (conns.length === 0) return;
+
+        const firstConn = conns[0];
+        const modelsRes = await fetch(`/api/connections/${firstConn.id}/models`);
+        if (modelsRes.ok) {
+          const data = await modelsRes.json();
+          if (data.models && data.models.length > 0) {
+            setNewChatSettings(prev => ({
+              ...prev,
+              connection_id: firstConn.id,
+              model_name: data.models[0].name
+            }));
+          }
+        }
+      }
+      pickDefaultModel();
+    }
+  }, [hasConnections, newChatSettings.model_name]);
 
   useEffect(() => {
     if (!activeChatId) {
@@ -68,7 +98,7 @@ export default function Home() {
       if (data.type === "message.new") {
         setMessages(prev => [...prev, data.message]);
         setIsLoading(false);
-        loadChats();
+        loadData(); // Обновить чаты
 
         if (data.message.role === "system") {
           setTimeout(() => {
@@ -92,7 +122,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       });
-      loadChats();
+      loadData();
     } else {
       setNewChatSettings(prev => ({ ...prev, ...settings }));
     }
@@ -135,6 +165,14 @@ export default function Home() {
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
+
+    // Запрет на отправку без выбора модели
+    const currentModel = activeChatId ? activeChat?.model_name : newChatSettings.model_name;
+    if (!currentModel) {
+      alert("Сначала выберите модель в правом верхнем углу.");
+      return;
+    }
+
     const prompt = input;
     setInput("");
 
@@ -156,7 +194,9 @@ export default function Home() {
     if (activeChatId === chatId) setActiveChatId(null);
   };
 
-  useEffect(() => { loadChats(); }, []);
+  useEffect(() => { loadData(); }, []);
+
+  const canSend = hasConnections && (activeChatId ? !!activeChat?.model_name : !!newChatSettings.model_name);
 
   return (
     <div className="flex h-screen bg-[#0f0f11] text-neutral-200 font-sans">
@@ -202,7 +242,20 @@ export default function Home() {
 
       {/* Область чата */}
       <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
-        {activeChatId ? (
+        {hasConnections === false ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-6">
+            <div className="w-16 h-16 bg-red-900/20 text-red-400 rounded-2xl flex items-center justify-center mb-6">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            </div>
+            <h1 className="text-2xl font-semibold mb-2">Нет подключений</h1>
+            <p className="text-neutral-500 text-sm mb-6 text-center max-w-sm">
+              Сначала добавьте подключение к серверу Ollama в настройках, чтобы начать общение.
+            </p>
+            <button onClick={() => setIsConnectionsOpen(true)} className="bg-white text-black px-6 py-2.5 rounded-lg font-medium hover:bg-neutral-200 transition-colors">
+              Добавить подключение
+            </button>
+          </div>
+        ) : activeChatId ? (
           <>
             <div className="h-14 border-b border-neutral-800 flex items-center justify-between px-6 bg-[#0f0f11]">
               <div className="font-semibold text-sm">{activeChat?.title || "Чат"}</div>
@@ -260,18 +313,18 @@ export default function Home() {
         )}
 
         <div className="p-4 bg-[#0f0f11]">
-          <div className="max-w-3xl mx-auto relative flex items-center bg-[#171719] border border-neutral-800 rounded-xl focus-within:border-neutral-600 transition-colors">
+          <div className={`max-w-3xl mx-auto relative flex items-center bg-[#171719] border rounded-xl transition-colors ${!canSend ? 'border-red-900/50 opacity-50' : 'border-neutral-800 focus-within:border-neutral-600'}`}>
             <input
               className="w-full bg-transparent p-4 pr-12 text-[15px] outline-none placeholder-neutral-500"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Спросите что-нибудь..."
-              disabled={isLoading}
+              placeholder={!canSend ? "Выберите модель или добавьте подключение" : "Спросите что-нибудь..."}
+              disabled={isLoading || !canSend}
             />
             <button
               onClick={handleSend}
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || !canSend}
               className="absolute right-2 p-2 bg-white text-black rounded-lg hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-white transition-colors"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
@@ -280,7 +333,7 @@ export default function Home() {
         </div>
       </div>
 
-      <ConnectionsModal isOpen={isConnectionsOpen} onClose={() => setIsConnectionsOpen(false)} />
+      <ConnectionsModal isOpen={isConnectionsOpen} onClose={() => { setIsConnectionsOpen(false); loadData(); }} />
 
       <ChatSettingsModal
         isOpen={isChatSettingsOpen}
