@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import type { Chat, Message } from "./types";
 import ConnectionsModal from "../components/ConnectionsModal";
 import ChatSettingsModal from "../components/ChatSettingsModal";
+import Markdown from "../components/Markdown";
 
 export default function Home() {
   const [chats, setChats] = useState<Chat[]>([]);
@@ -328,16 +329,20 @@ export default function Home() {
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {messages.map((m) => (
                 <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed whitespace-pre-wrap ${
+                  <div className={`text-[15px] leading-relaxed ${
                     m.role === "user"
-                      ? "bg-neutral-700 text-white"
+                      ? "max-w-[80%] bg-neutral-700 text-white px-4 py-2.5 rounded-2xl whitespace-pre-wrap"
                       : m.role === "system"
-                      ? "bg-red-900/30 text-red-200 border border-red-800/50 w-full text-center text-sm"
-                      : "bg-transparent text-neutral-200"
+                      ? "w-full bg-red-900/30 text-red-200 border border-red-800/50 rounded-2xl px-4 py-2.5 text-center text-sm"
+                      : "w-full text-neutral-200"
                   }`}>
-                    {m.role === "assistant" && <div className="font-semibold text-xs mb-1 text-neutral-400">Ollama</div>}
+                    {m.role === "assistant" && <div className="font-semibold text-xs mb-2 text-neutral-400">Ollama</div>}
                     {m.role === "system" && <div className="font-semibold text-xs mb-1">Система</div>}
-                    {m.content}
+                    {m.role === "assistant" ? (
+                      <Markdown content={m.content} />
+                    ) : (
+                      m.content
+                    )}
                   </div>
                 </div>
               ))}
