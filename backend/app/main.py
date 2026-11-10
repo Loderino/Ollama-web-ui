@@ -4,10 +4,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocket
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.celery_app import celery_app
 from app.config import settings
 from app.database import get_db
 from app.models import Chat, Connection, Message
 from app.schemas import (
+    CancelRequest,
     ChatCreate,
     ChatResponse,
     ChatUpdate,
@@ -129,19 +131,6 @@ async def delete_chat(chat_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
-@app.post("/generate")
-async def generate(request: GenerateRequest, db: AsyncSession = Depends(get_db)):
-    chat = await db.get(Chat, request.chat_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    task = generate_ollama_response.delay(
-        chat_id=request.chat_id,
-        prompt=request.prompt,
-    )
-    return {"task_id": task.id}
-
-
 @app.get("/chats/{chat_id}/messages", response_model=MessageListResponse)
 async def get_messages(
     chat_id: int,
@@ -167,6 +156,25 @@ async def get_messages(
     next_cursor = messages[0].id if len(messages) == limit else None
 
     return {"messages": messages, "next_cursor": next_cursor}
+
+
+@app.post("/generate")
+async def generate(request: GenerateRequest, db: AsyncSession = Depends(get_db)):
+    chat = await db.get(Chat, request.chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    task = generate_ollama_response.delay(
+        chat_id=request.chat_id,
+        prompt=request.prompt,
+    )
+    return {"task_id": task.id}
+
+
+@app.post("/generate/cancel")
+async def cancel_generation(request: CancelRequest):
+    celery_app.control.revoke(request.task_id, terminate=True)
+    return {"status": "cancelled"}
 
 
 @app.websocket("/ws/chat/{chat_id}")

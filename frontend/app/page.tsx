@@ -13,6 +13,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [hasConnections, setHasConnections] = useState<boolean | null>(null);
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
 
   const [isConnectionsOpen, setIsConnectionsOpen] = useState(false);
   const [isChatSettingsOpen, setIsChatSettingsOpen] = useState(false);
@@ -62,7 +63,6 @@ export default function Home() {
     setMessages(data.messages);
   };
 
-  // Автовыбор первой модели для нового чата
   useEffect(() => {
     if (hasConnections && !newChatSettings.model_name) {
       async function pickDefaultModel() {
@@ -87,7 +87,6 @@ export default function Home() {
     }
   }, [hasConnections, newChatSettings.model_name]);
 
-  // WebSocket
   useEffect(() => {
     if (!activeChatId) {
       if (wsRef.current) {
@@ -110,6 +109,7 @@ export default function Home() {
       if (data.type === "message.new") {
         setMessages(prev => [...prev, data.message]);
         setIsLoading(false);
+        setCurrentTaskId(null);
         loadData();
 
         if (data.message.role === "system") {
@@ -182,11 +182,38 @@ export default function Home() {
 
   const sendToBackend = async (chatId: number, prompt: string) => {
     setIsLoading(true);
-    await fetch("/api/generate", {
+    const res = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, prompt }),
     });
+    const data = await res.json();
+    if (data.task_id) setCurrentTaskId(data.task_id);
+  };
+
+  const cancelGeneration = async () => {
+    if (!currentTaskId) return;
+    try {
+      await fetch("/api/generate/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: currentTaskId }),
+      });
+      setIsLoading(false);
+      setCurrentTaskId(null);
+
+      const sysMsg: Message = {
+        id: Date.now(),
+        chat_id: activeChatId || 0,
+        role: "system",
+        content: "Генерация отменена."
+      };
+      setMessages(prev => [...prev, sysMsg]);
+      setTimeout(() => setMessages(prev => prev.filter(m => m.id !== sysMsg.id)), 3000);
+
+    } catch (e) {
+      console.error("Failed to cancel", e);
+    }
   };
 
   const handleSend = async () => {
@@ -213,7 +240,7 @@ export default function Home() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
       e.preventDefault();
-      handleSend();
+      if (!isLoading) handleSend();
     }
   };
 
@@ -233,7 +260,6 @@ export default function Home() {
   return (
     <div className="flex h-screen bg-[#0f0f11] text-neutral-200 font-sans">
 
-      {/* Боковая панель */}
       <div className="w-[260px] bg-[#171719] flex flex-col border-r border-neutral-800">
         <div className="p-4">
           <button onClick={() => setActiveChatId(null)} className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-neutral-800 transition-colors text-sm font-medium">
@@ -271,7 +297,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Область чата */}
       <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
         {hasConnections === false ? (
           <div className="flex-1 flex flex-col items-center justify-center p-6">
@@ -289,7 +314,6 @@ export default function Home() {
         ) : activeChatId ? (
           <>
             <div className="h-14 border-b border-neutral-800 flex items-center justify-between px-6 bg-[#0f0f11]">
-              {/* Редактируемый заголовок */}
               <div className="flex-1 flex items-center min-w-0 mr-4">
                 {isEditingTitle ? (
                   <input
@@ -346,6 +370,7 @@ export default function Home() {
                   </div>
                 </div>
               ))}
+
               {isLoading && (
                 <div className="flex justify-start">
                   <div className="text-sm text-neutral-500 animate-pulse flex items-center gap-2 py-2">
@@ -389,11 +414,19 @@ export default function Home() {
               disabled={isLoading || !canSend}
             />
             <button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim() || !canSend}
+              onClick={isLoading ? cancelGeneration : handleSend}
+              disabled={!isLoading && (!input.trim() || !canSend)}
               className="absolute right-2 bottom-2 p-2 bg-white text-black rounded-lg hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-white transition-colors"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              {isLoading ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              )}
             </button>
           </div>
         </div>

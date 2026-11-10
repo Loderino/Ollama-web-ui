@@ -93,3 +93,7 @@ class MessageResponse(BaseModel):
 class MessageListResponse(BaseModel):
     messages: list[MessageResponse]
     next_cursor: int | None
+
+
+class CancelRequest(BaseModel):
+    task_id: str
