@@ -38,6 +38,33 @@ services:
     networks:
       - app-network
 
+  clickhouse:
+    image: clickhouse:latest
+    container_name: ollama_web_clickhouse
+    environment:
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "${CLICKHOUSE_PORT}:8123"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse:/docker-entrypoint-initdb.d
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
+
   redis:
     image: redis:latest
     container_name: ollama_web_redis
@@ -74,6 +101,8 @@ services:
         condition: service_started
       rabbitmq:
         condition: service_healthy
+      clickhouse:
+        condition: service_healthy
     networks:
       - app-network
 
@@ -102,12 +131,15 @@ services:
         condition: service_started
       rabbitmq:
         condition: service_healthy
+      clickhouse:
+        condition: service_healthy
     networks:
       - app-network
 
 volumes:
   postgres_data:
   rabbitmq_data:
+  clickhouse_data:
 
 networks:
   app-network:

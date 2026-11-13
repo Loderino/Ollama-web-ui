@@ -6,6 +6,7 @@ import redis
 from sqlalchemy import select
 
 from app.celery_app import celery_app
+from app.clickhouse_client import log_metrics
 from app.config import settings
 from app.database import SyncSessionLocal
 from app.models import Chat, Connection, Message
@@ -62,12 +63,28 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
     full_answer = ""
     error_occurred = False
 
+    start_time = time.perf_counter()
+
     try:
         with httpx.Client(timeout=300.0) as client:
             response = client.post(ctx["url"], json=payload, headers=ctx["headers"])
             response.raise_for_status()
             data = response.json()
             full_answer = data.get("message", {}).get("content", "")
+
+            http_response_ms = int((time.perf_counter() - start_time) * 1000)
+
+            log_metrics(
+                model=ctx["model"],
+                prompt_tokens=data.get("prompt_eval_count", 0),
+                completion_tokens=data.get("eval_count", 0),
+                prompt_chars=len(prompt),
+                response_chars=len(full_answer),
+                http_response_ms=http_response_ms,
+                ollama_total_ms=int(data.get("total_duration", 0) / 1_000_000),
+                eval_duration_ms=int(data.get("eval_duration", 0) / 1_000_000),
+            )
+
     except httpx.HTTPStatusError as e:
         error_occurred = True
         full_answer = f"Ошибка сервера: HTTP {e.response.status_code}"
@@ -115,6 +132,9 @@ def generate_ollama_response_stream(chat_id: int, prompt: str) -> str:
     last_sent_time = time.monotonic()
     error_occurred = False
 
+    start_time = time.perf_counter()
+    final_data = {}
+
     try:
         with httpx.Client(timeout=300.0) as client:
             with client.stream("POST", ctx["url"], json=payload, headers=ctx["headers"]) as response:
@@ -137,6 +157,7 @@ def generate_ollama_response_stream(chat_id: int, prompt: str) -> str:
                             last_sent_time = now
 
                     if data.get("done"):
+                        final_data = data
                         break
 
     except httpx.HTTPStatusError as e:
@@ -152,6 +173,20 @@ def generate_ollama_response_stream(chat_id: int, prompt: str) -> str:
             r.publish(channel, json.dumps(event))
 
         if not error_occurred:
+            http_response_ms = int((time.perf_counter() - start_time) * 1000)
+
+            if final_data:
+                log_metrics(
+                    model=ctx["model"],
+                    prompt_tokens=final_data.get("prompt_eval_count", 0),
+                    completion_tokens=final_data.get("eval_count", 0),
+                    prompt_chars=len(prompt),
+                    response_chars=len(full_answer),
+                    http_response_ms=http_response_ms,
+                    ollama_total_ms=int(final_data.get("total_duration", 0) / 1_000_000),
+                    eval_duration_ms=int(final_data.get("eval_duration", 0) / 1_000_000),
+                )
+
             with SyncSessionLocal() as db:
                 final_content = full_answer if full_answer else "Генерация была прервана."
 

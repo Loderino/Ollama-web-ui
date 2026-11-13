@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     rabbitmq_port: int = 5672
     celery_result_backend: str = "rpc://"
     redis_url: str = "redis://redis:6379/0"
+    clickhouse_host: str = "clickhouse"
+    clickhouse_port: int = 8123
+    clickhouse_user: str = "default"
+    clickhouse_password: str = ""
+    clickhouse_db: str = "ollama_logs"
 
     @computed_field
     @property
