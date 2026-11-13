@@ -124,6 +124,9 @@ function ChatPage() {
   }, [searchParams]);
 
   const handleChatSelect = (chatId: number | null) => {
+    if (chatId !== activeChatId) {
+      setMessages([]); // Очищаем сообщения при переключении, чтобы не было мелькания
+    }
     setActiveChatId(chatId);
     if (chatId) {
       router.replace(`${pathname}?chat=${chatId}`, { scroll: false });
@@ -240,13 +243,14 @@ function ChatPage() {
         setCurrentTaskId(null);
 
         setMessages(prev => {
-          const lastAssistantIdx = prev.findLastIndex(m => m.role === "assistant");
-
-          if (lastAssistantIdx !== -1) {
+          // Ищем последнее сообщение. Если это ответ ассистента (значит был стриминг), заменяем его.
+          const last = prev[prev.length - 1];
+          if (last && last.role === "assistant") {
             const updated = [...prev];
-            updated[lastAssistantIdx] = data.message;
+            updated[updated.length - 1] = data.message;
             return updated;
           }
+          // Если последнее сообщение от пользователя (непотоковый режим), просто добавляем ответ
           return [...prev, data.message];
         });
 
@@ -322,7 +326,11 @@ function ChatPage() {
     }
 
     setChats([newChat, ...chats]);
-    handleChatSelect(newChat.id);
+
+    // Очищаем сообщения перед переключением на новый чат
+    setMessages([]);
+    setActiveChatId(newChat.id);
+    router.replace(`${pathname}?chat=${newChat.id}`, { scroll: false });
 
     await sendToBackend(newChat.id, prompt);
   };
