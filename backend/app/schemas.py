@@ -22,6 +22,7 @@ class ConnectionResponse(BaseModel):
 class GenerateRequest(BaseModel):
     chat_id: int
     prompt: str
+    think: bool | None = None
 
 
 class OllamaModelDetails(BaseModel):
@@ -88,6 +89,7 @@ class MessageResponse(BaseModel):
     chat_id: int
     role: str
     content: str
+    thinking: str | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

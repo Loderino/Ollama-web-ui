@@ -53,14 +53,22 @@ def _prepare_ollama_request(chat_id: int, prompt: str):
     retry_backoff=True,
     retry_jitter=True,
 )
-def generate_ollama_response(chat_id: int, prompt: str) -> str:
+def generate_ollama_response(chat_id: int, prompt: str, think: bool | None = None) -> str:
     ctx = _prepare_ollama_request(chat_id, prompt)
 
-    payload = {"model": ctx["model"], "messages": ctx["messages"], "stream": False, "options": ctx["options"]}
+    payload = {
+        "model": ctx["model"],
+        "messages": ctx["messages"],
+        "stream": False,
+        "options": ctx["options"],
+    }
+    if think is not None:
+        payload["think"] = think
 
     r = redis.from_url(settings.redis_url)
     channel = f"chat_{chat_id}"
     full_answer = ""
+    full_thinking = ""
     error_occurred = False
 
     start_time = time.perf_counter()
@@ -71,6 +79,7 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
             response.raise_for_status()
             data = response.json()
             full_answer = data.get("message", {}).get("content", "")
+            full_thinking = data.get("message", {}).get("thinking", "")
 
             http_response_ms = int((time.perf_counter() - start_time) * 1000)
 
@@ -94,14 +103,22 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
 
     if not error_occurred:
         with SyncSessionLocal() as db:
-            assistant_msg = Message(chat_id=chat_id, role="assistant", content=full_answer)
+            assistant_msg = Message(
+                chat_id=chat_id, role="assistant", content=full_answer, thinking=full_thinking or None
+            )
             db.add(assistant_msg)
             db.commit()
             msg_id = assistant_msg.id
 
         event = {
             "type": "message.done",
-            "message": {"id": msg_id, "chat_id": chat_id, "role": "assistant", "content": full_answer},
+            "message": {
+                "id": msg_id,
+                "chat_id": chat_id,
+                "role": "assistant",
+                "content": full_answer,
+                "thinking": full_thinking,
+            },
         }
     else:
         event = {
@@ -119,16 +136,25 @@ def generate_ollama_response(chat_id: int, prompt: str) -> str:
     retry_backoff=True,
     retry_jitter=True,
 )
-def generate_ollama_response_stream(chat_id: int, prompt: str) -> str:
+def generate_ollama_response_stream(chat_id: int, prompt: str, think: bool | None = None) -> str:
     ctx = _prepare_ollama_request(chat_id, prompt)
 
-    payload = {"model": ctx["model"], "messages": ctx["messages"], "stream": True, "options": ctx["options"]}
+    payload = {
+        "model": ctx["model"],
+        "messages": ctx["messages"],
+        "stream": True,
+        "options": ctx["options"],
+    }
+    if think is not None:
+        payload["think"] = think
 
     r = redis.from_url(settings.redis_url)
     channel = f"chat_{chat_id}"
 
     full_answer = ""
+    full_thinking = ""
     buffer = ""
+    thinking_buffer = ""
     last_sent_time = time.monotonic()
     error_occurred = False
 
@@ -143,18 +169,30 @@ def generate_ollama_response_stream(chat_id: int, prompt: str) -> str:
                     if not line:
                         continue
                     data = json.loads(line)
+
                     chunk_content = data.get("message", {}).get("content", "")
+                    chunk_thinking = data.get("message", {}).get("thinking", "")
 
                     if chunk_content:
                         full_answer += chunk_content
                         buffer += chunk_content
 
-                        now = time.monotonic()
-                        if now - last_sent_time >= 0.1:
-                            event = {"type": "message.chunk", "chat_id": chat_id, "content": buffer}
-                            r.publish(channel, json.dumps(event))
-                            buffer = ""
-                            last_sent_time = now
+                    if chunk_thinking:
+                        full_thinking += chunk_thinking
+                        thinking_buffer += chunk_thinking
+
+                    now = time.monotonic()
+                    if now - last_sent_time >= 0.1 and (buffer or thinking_buffer):
+                        event = {
+                            "type": "message.chunk",
+                            "chat_id": chat_id,
+                            "content": buffer,
+                            "thinking": thinking_buffer,
+                        }
+                        r.publish(channel, json.dumps(event))
+                        buffer = ""
+                        thinking_buffer = ""
+                        last_sent_time = now
 
                     if data.get("done"):
                         final_data = data
@@ -168,8 +206,8 @@ def generate_ollama_response_stream(chat_id: int, prompt: str) -> str:
         full_answer = "Не удалось подключиться к серверу Ollama."
 
     finally:
-        if buffer:
-            event = {"type": "message.chunk", "chat_id": chat_id, "content": buffer}
+        if buffer or thinking_buffer:
+            event = {"type": "message.chunk", "chat_id": chat_id, "content": buffer, "thinking": thinking_buffer}
             r.publish(channel, json.dumps(event))
 
         if not error_occurred:
@@ -190,14 +228,22 @@ def generate_ollama_response_stream(chat_id: int, prompt: str) -> str:
             with SyncSessionLocal() as db:
                 final_content = full_answer if full_answer else "Генерация была прервана."
 
-                assistant_msg = Message(chat_id=chat_id, role="assistant", content=final_content)
+                assistant_msg = Message(
+                    chat_id=chat_id, role="assistant", content=final_content, thinking=full_thinking or None
+                )
                 db.add(assistant_msg)
                 db.commit()
                 msg_id = assistant_msg.id
 
             event = {
                 "type": "message.done",
-                "message": {"id": msg_id, "chat_id": chat_id, "role": "assistant", "content": final_content},
+                "message": {
+                    "id": msg_id,
+                    "chat_id": chat_id,
+                    "role": "assistant",
+                    "content": final_content,
+                    "thinking": full_thinking,
+                },
             }
         else:
             event = {

@@ -34,6 +34,9 @@ function ChatPage() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
 
+  const [think, setThink] = useState(false);
+  const [supportsThinking, setSupportsThinking] = useState(false);
+
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -48,6 +51,34 @@ function ChatPage() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+  useEffect(() => {
+    async function checkCapabilities() {
+      const currentModel = activeChatId ? activeChat?.model_name : newChatSettings.model_name;
+      const connectionId = activeChatId ? activeChat?.connection_id : newChatSettings.connection_id;
+
+      if (!currentModel || !connectionId) {
+        setSupportsThinking(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/connections/${connectionId}/models`);
+        if (res.ok) {
+          const data = await res.json();
+          const modelData = data.models.find((m: any) => m.name === currentModel);
+          if (modelData && modelData.capabilities) {
+            setSupportsThinking(modelData.capabilities.includes("thinking"));
+          } else {
+            setSupportsThinking(false);
+          }
+        }
+      } catch (e) {
+        setSupportsThinking(false);
+      }
+    }
+    checkCapabilities();
+  }, [activeChatId, activeChat?.model_name, activeChat?.connection_id, newChatSettings.model_name, newChatSettings.connection_id]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -82,11 +113,9 @@ function ChatPage() {
       if (chatIdFromUrl) {
         const parsedId = Number(chatIdFromUrl);
 
-        // Проверяем, что это число и что такой чат есть в списке
         if (!isNaN(parsedId) && chatsData.some((c: Chat) => c.id === parsedId)) {
           setActiveChatId(parsedId);
         } else {
-          // Если чата нет, очищаем URL
           router.replace(pathname, { scroll: false });
         }
       }
@@ -188,14 +217,19 @@ function ChatPage() {
           const last = prev[prev.length - 1];
           if (last && last.role === "assistant") {
             const updated = [...prev];
-            updated[updated.length - 1] = { ...last, content: last.content + data.content };
+            updated[updated.length - 1] = {
+              ...last,
+              content: last.content + (data.content || ""),
+              thinking: (last.thinking || "") + (data.thinking || "")
+            };
             return updated;
           }
           return [...prev, {
             id: Date.now(),
             chat_id: data.chat_id,
             role: "assistant",
-            content: data.content
+            content: data.content || "",
+            thinking: data.thinking || ""
           }];
         });
         scrollToBottom();
@@ -234,12 +268,18 @@ function ChatPage() {
 
   const handleSaveSettings = async (settings: Partial<Chat>) => {
     if (activeChatId) {
-      await fetch(`/api/chats/${activeChatId}`, {
+      const res = await fetch(`/api/chats/${activeChatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       });
-      loadData();
+
+      if (res.ok) {
+        const updatedChat = await res.json();
+        setChats(prev => prev.map(c => c.id === activeChatId ? updatedChat : c));
+      } else {
+        loadData();
+      }
     } else {
       setNewChatSettings(prev => ({ ...prev, ...settings }));
     }
@@ -292,7 +332,11 @@ function ChatPage() {
     const res = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, prompt }),
+      body: JSON.stringify({
+        chat_id: chatId,
+        prompt,
+        think: supportsThinking ? think : undefined
+      }),
     });
     const data = await res.json();
     if (data.task_id) setCurrentTaskId(data.task_id);
@@ -470,6 +514,14 @@ function ChatPage() {
                   }`}>
                     {m.role === "assistant" && <div className="font-semibold text-xs mb-2 text-neutral-400">Ollama</div>}
                     {m.role === "system" && <div className="font-semibold text-xs mb-1">Система</div>}
+
+                    {m.role === "assistant" && m.thinking && (
+                      <details className="mb-3 text-sm text-neutral-400 bg-neutral-900/50 border border-neutral-800 rounded-lg p-3">
+                        <summary className="cursor-pointer font-medium select-none">Размышления модели</summary>
+                        <div className="mt-2 whitespace-pre-wrap font-mono text-xs">{m.thinking}</div>
+                      </details>
+                    )}
+
                     {m.role === "assistant" ? (
                       <Markdown content={m.content} />
                     ) : (
@@ -510,32 +562,57 @@ function ChatPage() {
         )}
 
         <div className="p-4 bg-[#0f0f11]">
-          <div className={`max-w-3xl mx-auto relative flex items-end bg-[#171719] border rounded-xl transition-colors ${!canSend ? 'border-red-900/50 opacity-50' : 'border-neutral-800 focus-within:border-neutral-600'}`}>
+          <div className={`max-w-3xl mx-auto bg-[#171719] border rounded-2xl transition-colors ${!canSend ? 'border-red-900/50 opacity-50' : 'border-neutral-800 focus-within:border-neutral-600'}`}>
+
             <textarea
               ref={textareaRef}
               rows={1}
-              className="w-full bg-transparent p-4 pr-12 text-[15px] outline-none placeholder-neutral-500 resize-none max-h-[150px] overflow-y-auto"
+              className="w-full bg-transparent p-4 pb-2 text-[15px] outline-none placeholder-neutral-500 resize-none max-h-[150px] overflow-y-auto"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={!canSend ? "Выберите модель или добавьте подключение" : "Спросите что-нибудь... (Shift+Enter для переноса)"}
+              placeholder={!canSend ? "Выберите модель или добавьте подключение" : "Спросите что-нибудь..."}
               disabled={isLoading || !canSend}
             />
-            <button
-              onClick={isLoading ? cancelGeneration : handleSend}
-              disabled={!isLoading && (!input.trim() || !canSend)}
-              className="absolute right-2 bottom-2 p-2 bg-white text-black rounded-lg hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-white transition-colors"
-            >
-              {isLoading ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 12h14M12 5l7 7-7 7"/>
-                </svg>
-              )}
-            </button>
+
+            <div className="flex items-center justify-between px-3 pb-3">
+              <div className="flex items-center gap-2">
+
+                {supportsThinking && (
+                  <button
+                    onClick={() => setThink(!think)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
+                      think
+                        ? "bg-blue-500/10 text-blue-400 border-blue-500/30"
+                        : "bg-transparent text-neutral-400 border-neutral-700 hover:bg-neutral-800"
+                    }`}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-1.54z"/>
+                      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-1.54z"/>
+                    </svg>
+                    Thinking
+                  </button>
+                )}
+
+              </div>
+
+              <button
+                onClick={isLoading ? cancelGeneration : handleSend}
+                disabled={!isLoading && (!input.trim() || !canSend)}
+                className="p-2 bg-white text-black rounded-lg hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+              >
+                {isLoading ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>

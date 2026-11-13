@@ -165,9 +165,11 @@ async def generate(request: GenerateRequest, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=400, detail="Chat not configured")
 
     if chat.is_streaming:
-        task = generate_ollama_response_stream.delay(chat_id=request.chat_id, prompt=request.prompt)
+        task = generate_ollama_response_stream.delay(
+            chat_id=request.chat_id, prompt=request.prompt, think=request.think
+        )
     else:
-        task = generate_ollama_response.delay(chat_id=request.chat_id, prompt=request.prompt)
+        task = generate_ollama_response.delay(chat_id=request.chat_id, prompt=request.prompt, think=request.think)
 
     return {"task_id": task.id}
 

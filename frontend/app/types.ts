@@ -20,4 +20,5 @@ export type Message = {
   chat_id: number;
   role: "user" | "assistant" | "system";
   content: string;
+  thinking?: string | null;
 };
