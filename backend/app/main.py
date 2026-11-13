@@ -8,6 +8,7 @@ from app.celery_app import celery_app
 from app.config import settings
 from app.database import get_db
 from app.models import Chat, Connection, Message
+from app.routers.metrics import router as metrics_router
 from app.schemas import (
     CancelRequest,
     ChatCreate,
@@ -22,6 +23,7 @@ from app.schemas import (
 from app.tasks import generate_ollama_response, generate_ollama_response_stream
 
 app = FastAPI(title="Ollama Web UI")
+app.include_router(metrics_router)
 
 
 @app.get("/health")
